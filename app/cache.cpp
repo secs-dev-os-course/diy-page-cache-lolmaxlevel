@@ -3,13 +3,26 @@
 #include <list>
 #include <iostream>
 #include "cache.h"
+#include <sstream>
+#include <ctime>
+#include <chrono>
 
 // Logging flag
 bool g_loggingEnabledCache = true;
 
+// Function to get current time as string
+std::string getCurrentTimeCache() {
+    auto now = std::time(nullptr);
+    std::tm tm;
+    localtime_s(&tm, &now);
+    std::stringstream ss;
+    ss << std::put_time(&tm, "%Y-%m-%d %H:%M:%S");
+    return ss.str();
+}
+
 // Logging macros
-#define LOG(x) if (g_loggingEnabledCache) std::cout << x << std::endl;
-#define LOG_ERROR(x) if (g_loggingEnabledCache) std::cerr << x << std::endl;
+#define LOG(x) if (g_loggingEnabledCache) std::cout << getCurrentTimeCache() << " " << x << std::endl;
+#define LOG_ERROR(x) if (g_loggingEnabledCache) std::cerr << getCurrentTimeCache() << " " << x << std::endl;
 
 const size_t PAGE_SIZE = 4096;
 const size_t NUM_OF_BLOCKS = 100;
@@ -62,7 +75,7 @@ private:
 };
 
 bool BlockCache::read(int fd, void *buf, size_t count, size_t offset) {
-    LOG("[BlockCache::read] Reading " << count << " bytes from fd: " << fd << " at offset: " << offset)
+//    LOG("[BlockCache::read] Reading " << count << " bytes from fd: " << fd << " at offset: " << offset)
     size_t alignedOffset = (offset / PAGE_SIZE) * PAGE_SIZE;
     auto fdIt = cacheMap.find(fd);
     if (fdIt != cacheMap.end()) {
@@ -101,7 +114,7 @@ bool BlockCache::read(int fd, void *buf, size_t count, size_t offset) {
 }
 
 bool BlockCache::write(int fd, const void *buf, size_t count, size_t offset) {
-    LOG("[BlockCache::write] Writing " << count << " bytes to fd: " << fd << " at offset: " << offset)
+//    LOG("[BlockCache::write] Writing " << count << " bytes to fd: " << fd << " at offset: " << offset)
     size_t alignedOffset = (offset / PAGE_SIZE) * PAGE_SIZE;
     auto fdIt = cacheMap.find(fd);
     if (fdIt != cacheMap.end()) {
@@ -214,7 +227,7 @@ int lab2_open(const char *path) {
 }
 
 ssize_t lab2_read(int fd, void *buf, size_t count) {
-    LOG("[lab2_read] Reading " << count << " bytes from fd: " << fd)
+//    LOG("[lab2_read] Reading " << count << " bytes from fd: " << fd)
     HANDLE handle = reinterpret_cast<HANDLE>(fd);
 
     LARGE_INTEGER currentPos;
@@ -224,10 +237,10 @@ ssize_t lab2_read(int fd, void *buf, size_t count) {
     }
 
     size_t offset = static_cast<size_t>(currentPos.QuadPart);
-    LOG("[lab2_read] Current file position: " << offset)
+//    LOG("[lab2_read] Current file position: " << offset)
 
     if (BlockCache::getInstance().read(fd, buf, count, offset)) {
-        LOG("[lab2_read] Data retrieved from cache for fd: " << fd << " at offset: " << offset)
+//        LOG("[lab2_read] Data retrieved from cache for fd: " << fd << " at offset: " << offset)
 
         // Adjust file pointer
         LARGE_INTEGER li;
@@ -245,11 +258,11 @@ ssize_t lab2_read(int fd, void *buf, size_t count) {
 }
 
 ssize_t lab2_write(int fd, const void *buf, size_t count, size_t offset) {
-    LOG("[lab2_write] Writing " << count << " bytes to fd: " << fd << " at offset: " << offset)
+//    LOG("[lab2_write] Writing " << count << " bytes to fd: " << fd << " at offset: " << offset)
     HANDLE handle = reinterpret_cast<HANDLE>(fd);
 
     if (BlockCache::getInstance().write(fd, buf, count, offset)) {
-        LOG("[lab2_write] Data written to cache for fd: " << fd << " at offset: " << offset)
+//        LOG("[lab2_write] Data written to cache for fd: " << fd << " at offset: " << offset)
         return static_cast<ssize_t>(count);
     }
 
@@ -275,7 +288,7 @@ int lab2_close(int fd) {
 }
 
 int64_t lab2_lseek(int fd, int64_t offset, int whence) {
-    LOG("[lab2_lseek] Seeking in fd: " << fd << " with offset: " << offset << " and whence: " << whence)
+//    LOG("[lab2_lseek] Seeking in fd: " << fd << " with offset: " << offset << " and whence: " << whence)
     HANDLE handle = reinterpret_cast<HANDLE>(fd);
     LARGE_INTEGER li;
     li.QuadPart = offset;
@@ -290,7 +303,7 @@ int64_t lab2_lseek(int fd, int64_t offset, int whence) {
         return -1;
     }
 
-    LOG("[lab2_lseek] New file position for fd: " << fd << " is: " << newPos.QuadPart)
+//    LOG("[lab2_lseek] New file position for fd: " << fd << " is: " << newPos.QuadPart)
     return static_cast<int64_t>(newPos.QuadPart);
 }
 

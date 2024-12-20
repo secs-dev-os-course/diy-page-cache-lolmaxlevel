@@ -207,14 +207,11 @@ bool verify_sorted(int fd, void *alignedBuffer) {
 
 // Partition function for QuickSort
 int partition(int fd, int low, int high, void *alignedBuffer) {
-    LOG("[partition] Called with low: " << low << ", high: " << high);
-
     int pivot;
     if (!get_element(fd, high, pivot, alignedBuffer)) {
         LOG_ERROR("[partition] Failed to get pivot element at index: " << high);
         return -1; // Indicate an error
     }
-    LOG("[partition] Selected pivot element: " << pivot << " at index: " << high);
 
     int i = low - 1;
 
@@ -245,7 +242,6 @@ int partition(int fd, int low, int high, void *alignedBuffer) {
 
 // QuickSort implementation
 bool quicksort(int fd, int low, int high, void *alignedBuffer) {
-    LOG("[quicksort] Called with low: " << low << ", high: " << high);
 
     // Base case
     if (low < high) {
@@ -278,7 +274,6 @@ int main() {
         LOG_ERROR("[main] Failed to create file.\n");
         return EXIT_FAILURE;
     }
-    LOG("[main] File created successfully.\n");
 
     // Opening the file for sorting
     int fd = lab2_open(file_path);
@@ -310,7 +305,6 @@ int main() {
         }
         return EXIT_FAILURE;
     }
-    std::cout << "[main]" << getCurrentTime() << " QuickSort completed successfully." << std::endl;
     LOG("[main] QuickSort completed successfully.");
 
     // Print first 10 elements after sorting
