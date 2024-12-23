@@ -2,14 +2,15 @@
 #include <unordered_map>
 #include <list>
 #include <iostream>
-#include "cache.h"
-#include <sstream>
+#include <iomanip>
 #include <ctime>
-#include <chrono>
+#include <locale>
+#include <codecvt>
+#include <sstream>
+#include "cache.h"
 
 // Logging flag
 bool g_loggingEnabledCache = true;
-
 // Function to get current time as string
 std::string getCurrentTimeCache() {
     auto now = std::time(nullptr);
@@ -35,11 +36,8 @@ public:
     }
 
     bool read(int fd, void *buf, size_t count, size_t offset);
-
     bool write(int fd, const void *buf, size_t count, size_t offset);
-
     void sync(int fd);
-
     void close(int fd);
 
 private:
@@ -60,8 +58,9 @@ private:
         int fd;
         size_t offset;
         bool dirty;
+        size_t frequency;
 
-        CacheBlock() : data(_aligned_malloc(PAGE_SIZE, PAGE_SIZE)), fd(-1), offset(0), dirty(false) {}
+        CacheBlock() : data(_aligned_malloc(PAGE_SIZE, PAGE_SIZE)), fd(-1), offset(0), dirty(false), frequency(0) {}
     };
 
     size_t cacheSize;
@@ -70,21 +69,18 @@ private:
     void *alignedBuffer;
 
     void evict();
-
     void writeBlockToDisk(const CacheBlock &block);
 };
 
 bool BlockCache::read(int fd, void *buf, size_t count, size_t offset) {
-//    LOG("[BlockCache::read] Reading " << count << " bytes from fd: " << fd << " at offset: " << offset)
     size_t alignedOffset = (offset / PAGE_SIZE) * PAGE_SIZE;
-    auto fdIt = cacheMap.find(fd);
-    if (fdIt != cacheMap.end()) {
-        auto offsetIt = fdIt->second.find(alignedOffset);
-        if (offsetIt != fdIt->second.end()) {
-            LOG("[BlockCache::read] Cache hit for fd: " << fd << " at offset: " << alignedOffset)
-            memcpy(buf, static_cast<char*>(offsetIt->second->data) + (offset - alignedOffset), count);
-            return true;
-        }
+    auto &fdMap = cacheMap[fd];
+    auto offsetIt = fdMap.find(alignedOffset);
+    if (offsetIt != fdMap.end()) {
+        LOG("[BlockCache::read] Cache hit for fd: " << fd << " at offset: " << alignedOffset)
+        memcpy(buf, static_cast<char*>(offsetIt->second->data) + (offset - alignedOffset), count);
+        offsetIt->second->frequency++;
+        return true;
     }
 
     LOG("[BlockCache::read] Cache miss for fd: " << fd << " at offset: " << alignedOffset)
@@ -107,6 +103,7 @@ bool BlockCache::read(int fd, void *buf, size_t count, size_t offset) {
     newBlock.fd = fd;
     newBlock.offset = alignedOffset;
     newBlock.dirty = false;
+    newBlock.frequency = 1;
     cache.push_front(newBlock);
     cacheMap[fd][alignedOffset] = cache.begin();
 
@@ -114,17 +111,15 @@ bool BlockCache::read(int fd, void *buf, size_t count, size_t offset) {
 }
 
 bool BlockCache::write(int fd, const void *buf, size_t count, size_t offset) {
-//    LOG("[BlockCache::write] Writing " << count << " bytes to fd: " << fd << " at offset: " << offset)
     size_t alignedOffset = (offset / PAGE_SIZE) * PAGE_SIZE;
-    auto fdIt = cacheMap.find(fd);
-    if (fdIt != cacheMap.end()) {
-        auto offsetIt = fdIt->second.find(alignedOffset);
-        if (offsetIt != fdIt->second.end()) {
-            LOG("[BlockCache::write] Cache hit for fd: " << fd << " at offset: " << alignedOffset)
-            memcpy(static_cast<char*>(offsetIt->second->data) + (offset - alignedOffset), buf, count);
-            offsetIt->second->dirty = true;
-            return true;
-        }
+    auto &fdMap = cacheMap[fd];
+    auto offsetIt = fdMap.find(alignedOffset);
+    if (offsetIt != fdMap.end()) {
+        LOG("[BlockCache::write] Cache hit for fd: " << fd << " at offset: " << alignedOffset)
+        memcpy(static_cast<char*>(offsetIt->second->data) + (offset - alignedOffset), buf, count);
+        offsetIt->second->dirty = true;
+        offsetIt->second->frequency++;
+        return true;
     }
 
     LOG("[BlockCache::write] Cache miss for fd: " << fd << " at offset: " << alignedOffset)
@@ -146,6 +141,7 @@ bool BlockCache::write(int fd, const void *buf, size_t count, size_t offset) {
     newBlock.fd = fd;
     newBlock.offset = alignedOffset;
     newBlock.dirty = true;
+    newBlock.frequency = 1;
     cache.push_front(newBlock);
     cacheMap[fd][alignedOffset] = cache.begin();
 
@@ -177,7 +173,7 @@ void BlockCache::close(int fd) {
 void BlockCache::evict() {
     LOG("[BlockCache::evict] Evicting least frequently used block.")
     auto it = std::min_element(cache.begin(), cache.end(), [](const CacheBlock &a, const CacheBlock &b) {
-        return a.offset < b.offset;
+        return a.frequency < b.frequency;
     });
 
     if (it != cache.end()) {
@@ -227,7 +223,6 @@ int lab2_open(const char *path) {
 }
 
 ssize_t lab2_read(int fd, void *buf, size_t count) {
-//    LOG("[lab2_read] Reading " << count << " bytes from fd: " << fd)
     HANDLE handle = reinterpret_cast<HANDLE>(fd);
 
     LARGE_INTEGER currentPos;
@@ -237,12 +232,8 @@ ssize_t lab2_read(int fd, void *buf, size_t count) {
     }
 
     size_t offset = static_cast<size_t>(currentPos.QuadPart);
-//    LOG("[lab2_read] Current file position: " << offset)
 
     if (BlockCache::getInstance().read(fd, buf, count, offset)) {
-//        LOG("[lab2_read] Data retrieved from cache for fd: " << fd << " at offset: " << offset)
-
-        // Adjust file pointer
         LARGE_INTEGER li;
         li.QuadPart = offset + count;
         if (!SetFilePointerEx(handle, li, NULL, FILE_BEGIN)) {
@@ -258,11 +249,9 @@ ssize_t lab2_read(int fd, void *buf, size_t count) {
 }
 
 ssize_t lab2_write(int fd, const void *buf, size_t count, size_t offset) {
-//    LOG("[lab2_write] Writing " << count << " bytes to fd: " << fd << " at offset: " << offset)
     HANDLE handle = reinterpret_cast<HANDLE>(fd);
 
     if (BlockCache::getInstance().write(fd, buf, count, offset)) {
-//        LOG("[lab2_write] Data written to cache for fd: " << fd << " at offset: " << offset)
         return static_cast<ssize_t>(count);
     }
 
@@ -288,7 +277,6 @@ int lab2_close(int fd) {
 }
 
 int64_t lab2_lseek(int fd, int64_t offset, int whence) {
-//    LOG("[lab2_lseek] Seeking in fd: " << fd << " with offset: " << offset << " and whence: " << whence)
     HANDLE handle = reinterpret_cast<HANDLE>(fd);
     LARGE_INTEGER li;
     li.QuadPart = offset;
@@ -303,7 +291,6 @@ int64_t lab2_lseek(int fd, int64_t offset, int whence) {
         return -1;
     }
 
-//    LOG("[lab2_lseek] New file position for fd: " << fd << " is: " << newPos.QuadPart)
     return static_cast<int64_t>(newPos.QuadPart);
 }
 
